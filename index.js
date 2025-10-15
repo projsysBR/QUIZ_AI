@@ -14,7 +14,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/", (_req, res) => res.json({ ok: true, service: "yt-vimeo-direct", uptime: process.uptime() }));
+app.get("/", (_req, res) => res.json({ ok: true, service: "yt-vimeo-no-token", uptime: process.uptime() }));
 
 const MAX = 20 * 1024 * 1024;
 const UA = { "user-agent": "Mozilla/5.0", "accept-language": "en-US,en;q=0.9" };
@@ -35,6 +35,7 @@ function isLikelyDirectMedia(ct) {
   return /^audio\//i.test(ct || "") || /^video\//i.test(ct || "");
 }
 
+// YouTube with retry
 async function bufferFromYouTubeWithRetry(url, { maxBytes = MAX, retries = 3 } = {}) {
   let attempt = 0;
   while (true) {
@@ -67,34 +68,41 @@ async function bufferFromYouTubeWithRetry(url, { maxBytes = MAX, retries = 3 } =
   }
 }
 
-async function bufferFromVimeo(url, { maxBytes = MAX } = {}) {
+// Vimeo sem token: usa player config público (se o dono permitir progressive)
+async function bufferFromVimeoNoToken(url, { maxBytes = MAX } = {}) {
   const u = new URL(url);
   const parts = u.pathname.split("/").filter(Boolean);
   const id = parts.pop();
   if (!/^\d+$/.test(id)) throw new Error("VIMEO_ID_NOT_FOUND");
 
-  const api = await fetch(`https://api.vimeo.com/videos/${id}`, {
-    headers: {
-      Authorization: `Bearer ${process.env.VIMEO_TOKEN}`,
-      Accept: "application/vnd.vimeo.*+json;version=3.4"
-    }
-  });
-  if (!api.ok) throw new Error(`VIMEO_API_${api.status}`);
-  const meta = await api.json();
-  const files = (meta.files || []).filter(f => f.link && f.quality && f.type === "video/mp4");
-  if (!files.length) throw new Error("VIMEO_NO_PROGRESSIVE_MP4");
-  files.sort((a, b) => (b.height || 0) - (a.height || 0));
-  const best = files[0].link;
+  const cfg = await fetch(`https://player.vimeo.com/video/${id}/config`, { headers: UA });
+  if (!cfg.ok) throw new Error(`VIMEO_CFG_${cfg.status}`);
+  const data = await cfg.json();
 
-  const resp = await fetch(best, { headers: UA });
-  if (!resp.ok) throw new Error(`VIMEO_FETCH_${resp.status}`);
-  const ct = (resp.headers.get("content-type") || "");
+  // caminhos possíveis (varia por conta/plano do vídeo)
+  // 1) arquivos progressivos em data.request.files.progressive
+  let prog = (data?.request?.files?.progressive) || [];
+  // 2) alguns retornam em data.request.files.hls (apenas m3u8 -> não suportamos sem ffmpeg)
+  if (!Array.isArray(prog) || !prog.length) {
+    throw new Error("VIMEO_NO_PROGRESSIVE_MP4");
+  }
+
+  // escolhe maior qualidade disponível
+  prog.sort((a,b) => (b.height||0) - (a.height||0));
+  const best = prog[0]?.url;
+  if (!best) throw new Error("VIMEO_NO_URL");
+
+  const r = await fetch(best, { headers: UA });
+  if (!r.ok) throw new Error(`VIMEO_FETCH_${r.status}`);
+  const ct = (r.headers.get("content-type") || "");
   if (!isLikelyDirectMedia(ct)) throw new Error(`VIMEO_UNSUPPORTED_CT_${ct}`);
-  const buf = Buffer.from(await resp.arrayBuffer());
+
+  const buf = Buffer.from(await r.arrayBuffer());
   if (buf.byteLength > maxBytes) throw new Error("AUDIO_TOO_LARGE");
   return buf;
 }
 
+// Direct URL
 async function bufferFromDirect(url, { maxBytes = MAX } = {}) {
   const r = await fetch(url, { headers: UA });
   if (!r.ok) throw new Error(`DIRECT_FETCH_${r.status}`);
@@ -112,11 +120,10 @@ app.post("/quiz-from-url", async (req, res) => {
 
     let buf;
     if (isYouTube(url)) buf = await bufferFromYouTubeWithRetry(url);
-    else if (isVimeo(url)) {
-      if (!process.env.VIMEO_TOKEN) return res.status(400).json({ error: "Falta VIMEO_TOKEN" });
-      buf = await bufferFromVimeo(url);
-    } else buf = await bufferFromDirect(url);
+    else if (isVimeo(url)) buf = await bufferFromVimeoNoToken(url);
+    else buf = await bufferFromDirect(url);
 
+    // Transcrição
     const form = new FormData();
     form.append("model", "gpt-4o-mini-transcribe");
     form.append("file", buf, { filename: "media.mp3", contentType: "audio/mpeg" });
@@ -177,4 +184,4 @@ ${transcript}`;
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`yt-vimeo-direct listening on :${PORT}`));
+app.listen(PORT, () => console.log(`yt-vimeo-no-token listening on :${PORT}`));
