@@ -6,27 +6,23 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-// CORS liberado para testes (ajuste para seu domínio em produção)
+// CORS liberado para testes (ajuste para produção)
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
+// Healthcheck
 app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "yt-allinone-single", uptime: process.uptime() });
+  res.json({ ok: true, service: "yt-allinone-fixed", uptime: process.uptime() });
 });
 
 /**
  * POST /quiz-from-youtube
  * Body: { "url": "https://www.youtube.com/watch?v=...", "num": 5 }
- * - Pega melhor faixa de áudio via ytdl
- * - Baixa para buffer (até ~20MB por padrão)
- * - Transcreve na OpenAI
- * - Gera N questões de múltipla escolha (5 alternativas, 1 correta)
- * Retorna: { transcript, questions }
  */
 app.post("/quiz-from-youtube", async (req, res) => {
   try {
@@ -35,34 +31,49 @@ app.post("/quiz-from-youtube", async (req, res) => {
       return res.status(400).json({ error: "URL inválida do YouTube" });
     }
 
-    // 1) Info do vídeo e limite de duração
-    const info = await ytdl.getInfo(url);
-    const lengthSec = parseInt(info.videoDetails.lengthSeconds || "0", 10);
-    if (lengthSec > 900) {
-      return res.status(413).json({ error: "Vídeo muito longo (> 15 min). Use um vídeo menor." });
-    }
+    // Limitar duração (evita timeouts em planos free)
+    try {
+      const info = await ytdl.getInfo(url);
+      const lengthSec = parseInt(info.videoDetails.lengthSeconds || "0", 10);
+      if (lengthSec > 900) {
+        return res.status(413).json({ error: "Vídeo muito longo (> 15 min) para este endpoint." });
+      }
+    } catch {}
 
-    // 2) Melhor faixa de áudio
-    const formats = ytdl.filterFormats(info.formats, "audioonly")
-      .filter(f => f.url && (f.mimeType || "").includes("audio"))
-      .sort((a,b) => (b.audioBitrate||0) - (a.audioBitrate||0));
-    if (!formats.length) return res.status(415).json({ error: "Não encontrei faixa de áudio" });
-    const best = formats[0];
+    // 1) Stream via ytdl (evita 410)
+    const MAX = 20 * 1024 * 1024; // 20 MB
+    const audioStream = ytdl(url, {
+      quality: "highestaudio",
+      filter: "audioonly",
+      highWaterMark: 1 << 25,
+      requestOptions: {
+        headers: {
+          "user-agent": "Mozilla/5.0",
+          "accept-language": "en-US,en;q=0.9"
+        }
+      }
+    });
 
-    // 3) Baixar para buffer (estável, evita ECONNRESET)
-    const MAX = 20 * 1024 * 1024; // 20MB
-    const audioRes = await fetch(best.url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!audioRes.ok) return res.status(400).json({ error: `Falha ao baixar áudio (${audioRes.status})` });
-    const type = (audioRes.headers.get("content-type") || "audio/mpeg").split(";")[0];
-    const buf = Buffer.from(await audioRes.arrayBuffer());
-    if (buf.byteLength > MAX) {
-      return res.status(413).json({ error: `Áudio muito grande (${(buf.byteLength/1024/1024).toFixed(1)} MB)` });
-    }
+    const chunks = [];
+    let size = 0;
+    await new Promise((resolve, reject) => {
+      audioStream.on("data", (d) => {
+        size += d.length;
+        if (size > MAX) {
+          audioStream.destroy();
+          return reject(new Error("AUDIO_TOO_LARGE"));
+        }
+        chunks.push(d);
+      });
+      audioStream.on("end", resolve);
+      audioStream.on("error", (e) => reject(e));
+    });
+    const buf = Buffer.concat(chunks);
 
-    // 4) Transcrever
+    // 2) Transcrever
     const form = new FormData();
     form.append("model", "gpt-4o-mini-transcribe");
-    form.append("file", buf, { filename: `yt.${type.split("/")[1]||"mp3"}`, contentType: type });
+    form.append("file", buf, { filename: "yt.mp3", contentType: "audio/mpeg" });
 
     const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -73,13 +84,13 @@ app.post("/quiz-from-youtube", async (req, res) => {
     if (!tr.ok) return res.status(tr.status).type("application/json").send(trText);
 
     let transcript = "";
-    try {
-      const parsed = JSON.parse(trText);
-      transcript = (parsed.text || parsed.transcript || "").toString();
-    } catch { /* keep empty */ }
-    if (!transcript) return res.status(200).json({ transcript: trText, questions: [] });
+    try { transcript = (JSON.parse(trText).text || "").toString(); } catch {}
 
-    // 5) Questões
+    if (!transcript) {
+      return res.status(200).json({ transcript: trText, questions: [] });
+    }
+
+    // 3) Gerar questões
     const prompt = `Gere ${num} questões de múltipla escolha sobre o texto a seguir.
 Cada questão deve ter 5 alternativas (A, B, C, D, E), com exatamente 1 correta.
 Retorne APENAS JSON válido:
@@ -125,7 +136,7 @@ ${transcript}
       } catch {
         questionsPayload = parsed;
       }
-    } catch { /* leave as text */ }
+    } catch {}
 
     return res.status(200).json({
       transcript,
@@ -133,11 +144,14 @@ ${transcript}
     });
 
   } catch (e) {
+    if (String(e).includes("AUDIO_TOO_LARGE")) {
+      return res.status(413).json({ error: "Áudio muito grande (> 20 MB). Tente um vídeo menor." });
+    }
     return res.status(500).json({ error: String(e) });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`yt-allinone-single listening on :${PORT}`);
+  console.log(`yt-allinone-fixed listening on :${PORT}`);
 });
