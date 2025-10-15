@@ -6,7 +6,6 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-// CORS
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -15,71 +14,112 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/", (_req, res) => res.json({ ok: true, service: "yt-allinone-retry2", uptime: process.uptime() }));
+app.get("/", (_req, res) => res.json({ ok: true, service: "yt-vimeo-direct", uptime: process.uptime() }));
 
-// Retry with fresh info each time; use downloadFromInfo; smaller chunks
-async function streamToBufferWithFreshInfo(url, { maxBytes = 20 * 1024 * 1024, retries = 4 } = {}) {
+const MAX = 20 * 1024 * 1024;
+const UA = { "user-agent": "Mozilla/5.0", "accept-language": "en-US,en;q=0.9" };
+
+function isYouTube(u) {
+  try {
+    const h = new URL(u).hostname.replace(/^www\./, "");
+    return ["youtube.com", "youtu.be"].some(x => h.endsWith(x));
+  } catch { return false; }
+}
+function isVimeo(u) {
+  try {
+    const h = new URL(u).hostname.replace(/^www\./, "");
+    return h.endsWith("vimeo.com");
+  } catch { return false; }
+}
+function isLikelyDirectMedia(ct) {
+  return /^audio\//i.test(ct || "") || /^video\//i.test(ct || "");
+}
+
+async function bufferFromYouTubeWithRetry(url, { maxBytes = MAX, retries = 3 } = {}) {
   let attempt = 0;
   while (true) {
     try {
-      const info = await ytdl.getInfo(url);
-      const audioStream = ytdl.downloadFromInfo(info, {
-        filter: "audioonly",
+      const audio = ytdl(url, {
         quality: "highestaudio",
+        filter: "audioonly",
         highWaterMark: 1 << 25,
-        dlChunkSize: 6 * 1024 * 1024, // 6MB chunks
-        requestOptions: {
-          headers: {
-            "user-agent": "Mozilla/5.0",
-            "accept-language": "en-US,en;q=0.9"
-          }
-        }
+        requestOptions: { headers: UA }
       });
-
       const chunks = [];
       let size = 0;
       await new Promise((resolve, reject) => {
-        audioStream.on("data", (d) => {
+        audio.on("data", (d) => {
           size += d.length;
-          if (size > maxBytes) {
-            audioStream.destroy();
-            return reject(new Error("AUDIO_TOO_LARGE"));
-          }
+          if (size > maxBytes) { audio.destroy(); return reject(new Error("AUDIO_TOO_LARGE")); }
           chunks.push(d);
         });
-        audioStream.on("end", resolve);
-        audioStream.on("error", (e) => reject(e));
+        audio.on("end", resolve);
+        audio.on("error", reject);
       });
-
       return Buffer.concat(chunks);
     } catch (e) {
       const msg = String(e || "");
-      const retriable = /Status code:\s?(410|403|404|429)/.test(msg) || /No such format/.test(msg);
+      const retriable = /Status code:\s?(410|403|404|429)/.test(msg);
       if (!retriable || attempt >= retries) throw e;
-      attempt += 1;
-      await new Promise(r => setTimeout(r, 800 * attempt)); // backoff crescente
+      attempt++;
+      await new Promise(r => setTimeout(r, 800 * attempt));
     }
   }
 }
 
-app.post("/quiz-from-youtube", async (req, res) => {
+async function bufferFromVimeo(url, { maxBytes = MAX } = {}) {
+  const u = new URL(url);
+  const parts = u.pathname.split("/").filter(Boolean);
+  const id = parts.pop();
+  if (!/^\d+$/.test(id)) throw new Error("VIMEO_ID_NOT_FOUND");
+
+  const api = await fetch(`https://api.vimeo.com/videos/${id}`, {
+    headers: {
+      Authorization: `Bearer ${process.env.VIMEO_TOKEN}`,
+      Accept: "application/vnd.vimeo.*+json;version=3.4"
+    }
+  });
+  if (!api.ok) throw new Error(`VIMEO_API_${api.status}`);
+  const meta = await api.json();
+  const files = (meta.files || []).filter(f => f.link && f.quality && f.type === "video/mp4");
+  if (!files.length) throw new Error("VIMEO_NO_PROGRESSIVE_MP4");
+  files.sort((a, b) => (b.height || 0) - (a.height || 0));
+  const best = files[0].link;
+
+  const resp = await fetch(best, { headers: UA });
+  if (!resp.ok) throw new Error(`VIMEO_FETCH_${resp.status}`);
+  const ct = (resp.headers.get("content-type") || "");
+  if (!isLikelyDirectMedia(ct)) throw new Error(`VIMEO_UNSUPPORTED_CT_${ct}`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+  if (buf.byteLength > maxBytes) throw new Error("AUDIO_TOO_LARGE");
+  return buf;
+}
+
+async function bufferFromDirect(url, { maxBytes = MAX } = {}) {
+  const r = await fetch(url, { headers: UA });
+  if (!r.ok) throw new Error(`DIRECT_FETCH_${r.status}`);
+  const ct = (r.headers.get("content-type") || "");
+  if (!isLikelyDirectMedia(ct)) throw new Error(`DIRECT_UNSUPPORTED_CT_${ct}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.byteLength > maxBytes) throw new Error("AUDIO_TOO_LARGE");
+  return buf;
+}
+
+app.post("/quiz-from-url", async (req, res) => {
   try {
     const { url, num = 5 } = req.body || {};
-    if (!url || !ytdl.validateURL(url)) return res.status(400).json({ error: "URL inválida do YouTube" });
+    if (!url) return res.status(400).json({ error: "Informe 'url'" });
 
-    // Optional: length cap
-    try {
-      const info = await ytdl.getInfo(url);
-      const lengthSec = parseInt(info.videoDetails.lengthSeconds || "0", 10);
-      if (lengthSec > 900) return res.status(413).json({ error: "Vídeo muito longo (> 15 min)" });
-    } catch {}
-
-    const MAX = 20 * 1024 * 1024;
-    const buf = await streamToBufferWithFreshInfo(url, { maxBytes: MAX, retries: 4 });
+    let buf;
+    if (isYouTube(url)) buf = await bufferFromYouTubeWithRetry(url);
+    else if (isVimeo(url)) {
+      if (!process.env.VIMEO_TOKEN) return res.status(400).json({ error: "Falta VIMEO_TOKEN" });
+      buf = await bufferFromVimeo(url);
+    } else buf = await bufferFromDirect(url);
 
     const form = new FormData();
     form.append("model", "gpt-4o-mini-transcribe");
-    form.append("file", buf, { filename: "yt.mp3", contentType: "audio/mpeg" });
+    form.append("file", buf, { filename: "media.mp3", contentType: "audio/mpeg" });
 
     const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -91,6 +131,7 @@ app.post("/quiz-from-youtube", async (req, res) => {
 
     let transcript = "";
     try { transcript = (JSON.parse(trText).text || "").toString(); } catch {}
+    if (!transcript) return res.status(200).json({ transcript: trText, questions: [] });
 
     const prompt = `Gere ${num} questões de múltipla escolha sobre o texto a seguir.
 Cada questão deve ter 5 alternativas (A, B, C, D, E), com exatamente 1 correta.
@@ -122,26 +163,18 @@ ${transcript}`;
     let questionsPayload = null;
     try {
       const parsed = JSON.parse(respText);
-      const textOut = parsed.output_text || parsed.output || respText;
-      try {
-        questionsPayload = typeof textOut === "string" ? JSON.parse(textOut) : textOut;
-      } catch {
-        questionsPayload = parsed;
-      }
-    } catch {}
+      const out = parsed.output_text || parsed.output || respText;
+      questionsPayload = typeof out === "string" ? JSON.parse(out) : out;
+    } catch { questionsPayload = respText; }
 
-    return res.status(200).json({
-      transcript,
-      questions: questionsPayload?.questions || questionsPayload || respText
-    });
+    return res.status(200).json({ transcript, questions: questionsPayload?.questions || questionsPayload || respText });
 
   } catch (e) {
-    if (String(e).includes("AUDIO_TOO_LARGE")) {
-      return res.status(413).json({ error: "Áudio muito grande (> 20 MB). Tente vídeo menor." });
-    }
-    return res.status(500).json({ error: String(e) });
+    const msg = String(e || "");
+    if (msg.includes("AUDIO_TOO_LARGE")) return res.status(413).json({ error: "Mídia muito grande (>20MB)." });
+    return res.status(500).json({ error: msg });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`yt-allinone-retry2 listening on :${PORT}`));
+app.listen(PORT, () => console.log(`yt-vimeo-direct listening on :${PORT}`));
