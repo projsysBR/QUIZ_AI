@@ -6,7 +6,7 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-// CORS liberado para testes (ajuste para produção)
+// CORS liberado
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -17,13 +17,52 @@ app.use((req, res, next) => {
 
 // Healthcheck
 app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "yt-allinone-fixed", uptime: process.uptime() });
+  res.json({ ok: true, service: "yt-allinone-retry", uptime: process.uptime() });
 });
 
-/**
- * POST /quiz-from-youtube
- * Body: { "url": "https://www.youtube.com/watch?v=...", "num": 5 }
- */
+// Função com retry
+async function streamToBufferWithRetry(url, { maxBytes = 20 * 1024 * 1024, retries = 2 } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      const audioStream = ytdl(url, {
+        quality: "highestaudio",
+        filter: "audioonly",
+        highWaterMark: 1 << 25,
+        requestOptions: {
+          headers: {
+            "user-agent": "Mozilla/5.0",
+            "accept-language": "en-US,en;q=0.9"
+          }
+        }
+      });
+
+      const chunks = [];
+      let size = 0;
+      await new Promise((resolve, reject) => {
+        audioStream.on("data", (d) => {
+          size += d.length;
+          if (size > maxBytes) {
+            audioStream.destroy();
+            return reject(new Error("AUDIO_TOO_LARGE"));
+          }
+          chunks.push(d);
+        });
+        audioStream.on("end", resolve);
+        audioStream.on("error", (e) => reject(e));
+      });
+
+      return Buffer.concat(chunks);
+    } catch (e) {
+      const msg = String(e || "");
+      const retriable = /Status code:\s?(410|403|404)/.test(msg);
+      if (!retriable || attempt >= retries) throw e;
+      attempt += 1;
+      await new Promise(r => setTimeout(r, 700 * attempt));
+    }
+  }
+}
+
 app.post("/quiz-from-youtube", async (req, res) => {
   try {
     const { url, num = 5 } = req.body || {};
@@ -31,46 +70,18 @@ app.post("/quiz-from-youtube", async (req, res) => {
       return res.status(400).json({ error: "URL inválida do YouTube" });
     }
 
-    // Limitar duração (evita timeouts em planos free)
+    let info;
     try {
-      const info = await ytdl.getInfo(url);
+      info = await ytdl.getInfo(url);
       const lengthSec = parseInt(info.videoDetails.lengthSeconds || "0", 10);
       if (lengthSec > 900) {
-        return res.status(413).json({ error: "Vídeo muito longo (> 15 min) para este endpoint." });
+        return res.status(413).json({ error: "Vídeo muito longo (> 15 min)" });
       }
     } catch {}
 
-    // 1) Stream via ytdl (evita 410)
-    const MAX = 20 * 1024 * 1024; // 20 MB
-    const audioStream = ytdl(url, {
-      quality: "highestaudio",
-      filter: "audioonly",
-      highWaterMark: 1 << 25,
-      requestOptions: {
-        headers: {
-          "user-agent": "Mozilla/5.0",
-          "accept-language": "en-US,en;q=0.9"
-        }
-      }
-    });
+    const MAX = 20 * 1024 * 1024;
+    const buf = await streamToBufferWithRetry(url, { maxBytes: MAX, retries: 2 });
 
-    const chunks = [];
-    let size = 0;
-    await new Promise((resolve, reject) => {
-      audioStream.on("data", (d) => {
-        size += d.length;
-        if (size > MAX) {
-          audioStream.destroy();
-          return reject(new Error("AUDIO_TOO_LARGE"));
-        }
-        chunks.push(d);
-      });
-      audioStream.on("end", resolve);
-      audioStream.on("error", (e) => reject(e));
-    });
-    const buf = Buffer.concat(chunks);
-
-    // 2) Transcrever
     const form = new FormData();
     form.append("model", "gpt-4o-mini-transcribe");
     form.append("file", buf, { filename: "yt.mp3", contentType: "audio/mpeg" });
@@ -86,25 +97,11 @@ app.post("/quiz-from-youtube", async (req, res) => {
     let transcript = "";
     try { transcript = (JSON.parse(trText).text || "").toString(); } catch {}
 
-    if (!transcript) {
-      return res.status(200).json({ transcript: trText, questions: [] });
-    }
-
-    // 3) Gerar questões
     const prompt = `Gere ${num} questões de múltipla escolha sobre o texto a seguir.
 Cada questão deve ter 5 alternativas (A, B, C, D, E), com exatamente 1 correta.
-Retorne APENAS JSON válido:
-{
-  "questions": [
-    { "pergunta": "...",
-      "alternativas": ["A) ...","B) ...","C) ...","D) ...","E) ..."],
-      "correta": "B"
-    }
-  ]
-}
+Retorne APENAS JSON válido.
 Texto:
-${transcript}
-`;
+${transcript}`;
 
     const body = {
       model: "o3-mini",
@@ -152,6 +149,4 @@ ${transcript}
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`yt-allinone-fixed listening on :${PORT}`);
-});
+app.listen(PORT, () => console.log(`yt-allinone-retry listening on :${PORT}`));
