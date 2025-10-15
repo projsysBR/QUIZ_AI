@@ -6,7 +6,7 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-// CORS liberado
+// CORS
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -15,20 +15,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// Healthcheck
-app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "yt-allinone-retry", uptime: process.uptime() });
-});
+app.get("/", (_req, res) => res.json({ ok: true, service: "yt-allinone-retry2", uptime: process.uptime() }));
 
-// Função com retry
-async function streamToBufferWithRetry(url, { maxBytes = 20 * 1024 * 1024, retries = 2 } = {}) {
+// Retry with fresh info each time; use downloadFromInfo; smaller chunks
+async function streamToBufferWithFreshInfo(url, { maxBytes = 20 * 1024 * 1024, retries = 4 } = {}) {
   let attempt = 0;
   while (true) {
     try {
-      const audioStream = ytdl(url, {
-        quality: "highestaudio",
+      const info = await ytdl.getInfo(url);
+      const audioStream = ytdl.downloadFromInfo(info, {
         filter: "audioonly",
+        quality: "highestaudio",
         highWaterMark: 1 << 25,
+        dlChunkSize: 6 * 1024 * 1024, // 6MB chunks
         requestOptions: {
           headers: {
             "user-agent": "Mozilla/5.0",
@@ -55,10 +54,10 @@ async function streamToBufferWithRetry(url, { maxBytes = 20 * 1024 * 1024, retri
       return Buffer.concat(chunks);
     } catch (e) {
       const msg = String(e || "");
-      const retriable = /Status code:\s?(410|403|404)/.test(msg);
+      const retriable = /Status code:\s?(410|403|404|429)/.test(msg) || /No such format/.test(msg);
       if (!retriable || attempt >= retries) throw e;
       attempt += 1;
-      await new Promise(r => setTimeout(r, 700 * attempt));
+      await new Promise(r => setTimeout(r, 800 * attempt)); // backoff crescente
     }
   }
 }
@@ -66,21 +65,17 @@ async function streamToBufferWithRetry(url, { maxBytes = 20 * 1024 * 1024, retri
 app.post("/quiz-from-youtube", async (req, res) => {
   try {
     const { url, num = 5 } = req.body || {};
-    if (!url || !ytdl.validateURL(url)) {
-      return res.status(400).json({ error: "URL inválida do YouTube" });
-    }
+    if (!url || !ytdl.validateURL(url)) return res.status(400).json({ error: "URL inválida do YouTube" });
 
-    let info;
+    // Optional: length cap
     try {
-      info = await ytdl.getInfo(url);
+      const info = await ytdl.getInfo(url);
       const lengthSec = parseInt(info.videoDetails.lengthSeconds || "0", 10);
-      if (lengthSec > 900) {
-        return res.status(413).json({ error: "Vídeo muito longo (> 15 min)" });
-      }
+      if (lengthSec > 900) return res.status(413).json({ error: "Vídeo muito longo (> 15 min)" });
     } catch {}
 
     const MAX = 20 * 1024 * 1024;
-    const buf = await streamToBufferWithRetry(url, { maxBytes: MAX, retries: 2 });
+    const buf = await streamToBufferWithFreshInfo(url, { maxBytes: MAX, retries: 4 });
 
     const form = new FormData();
     form.append("model", "gpt-4o-mini-transcribe");
@@ -142,11 +137,11 @@ ${transcript}`;
 
   } catch (e) {
     if (String(e).includes("AUDIO_TOO_LARGE")) {
-      return res.status(413).json({ error: "Áudio muito grande (> 20 MB). Tente um vídeo menor." });
+      return res.status(413).json({ error: "Áudio muito grande (> 20 MB). Tente vídeo menor." });
     }
     return res.status(500).json({ error: String(e) });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`yt-allinone-retry listening on :${PORT}`));
+app.listen(PORT, () => console.log(`yt-allinone-retry2 listening on :${PORT}`));

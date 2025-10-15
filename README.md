@@ -1,18 +1,6 @@
-# yt-allinone-retry
+# yt-allinone-retry2
 
-Versão com retry automático em caso de erro 410, 403 ou 404 no download de áudio.
-Rota única para transcrição e geração de questões a partir de um vídeo do YouTube.
+- Refaz `getInfo` a cada tentativa e usa `ytdl.downloadFromInfo` com `dlChunkSize` para reduzir erros 410.
+- Rota única `/quiz-from-youtube` (transcrição + questões).
 
-## Endpoint
-POST /quiz-from-youtube
-
-Body:
-{
-  "url": "https://www.youtube.com/watch?v=XXXXXXX",
-  "num": 5
-}
-
-## Deploy
-- Build: npm install
-- Start: node index.js
-- Env Var: OPENAI_API_KEY=sk-...
+Deploy igual aos anteriores. Var: `OPENAI_API_KEY`.
