@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v9-pdf",
-  "version": "1.9.0",
-  "description": "Transcrição de áudio e leitura de PDF + quiz em PT-BR",
+  "name": "quiz-ai-render-v9.1-pdfjs",
+  "version": "1.9.1",
+  "description": "Áudio + PDF (pdfjs-dist) + quiz PT-BR",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -12,6 +12,6 @@
     "form-data": "^4.0.0",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^3.3.2",
-    "pdf-parse": "^1.1.1"
+    "pdfjs-dist": "^4.6.82"
   }
 }
