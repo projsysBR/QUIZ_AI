@@ -20,12 +20,14 @@ function sniffContentType(buf) {
   // ID3 / MP3
   if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return { ct: "audio/mpeg", ext: "mp3" };
   if (buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0) return { ct: "audio/mpeg", ext: "mp3" };
-  // WEBM
+  // WEBM (EBML)
   if (buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3) return { ct: "audio/webm", ext: "webm" };
   // MP4 (ftyp)
   if (buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) return { ct: "audio/mp4", ext: "m4a" };
   // WAV (RIFF....WAVE)
-  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 and buf[8] === 0x57 and buf[9] === 0x41 and buf[10] === 0x56 and buf[11] === 0x45) return { ct: "audio/wav", ext: "wav" };
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x41 && buf[10] === 0x56 && buf[11] === 0x45) {
+    return { ct: "audio/wav", ext: "wav" };
+  }
   return null;
 }
 
@@ -51,8 +53,10 @@ async function bufferFromDirect(url) {
   const serverCT = r.headers.get("content-type") || "";
   const buf = Buffer.from(await r.arrayBuffer());
   const sniff = sniffContentType(buf);
-  const final = sniff || (serverCT.includes("application/pdf") ? { ct: "application/pdf", ext: "pdf" } :
-               (serverCT.includes("webm") ? { ct: "audio/webm", ext: "webm" } : { ct: "audio/mpeg", ext: "mp3" }));
+  const final = sniff
+    || (serverCT.includes("application/pdf") ? { ct: "application/pdf", ext: "pdf" }
+        : (serverCT.includes("webm") ? { ct: "audio/webm", ext: "webm" }
+           : { ct: "audio/mpeg", ext: "mp3" }));
   return { buf, contentType: final.ct, ext: final.ext, serverCT };
 }
 
@@ -176,4 +180,4 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server v9.1 (pdfjs) running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server v9.2 (pdfjs) running on ${PORT}`));

@@ -1,5 +1,6 @@
-# Quiz API v9.1 (pdfjs-dist)
-- Suporte a **PDF** com `pdfjs-dist` (sem arquivos de teste)
+# Quiz API v9.2 (pdfjs)
+- Corrige condição WAV (troca 'and' por '&&')
+- Suporte a PDF com pdfjs-dist
 - Suporte a áudio (mp3/m4a/webm/wav)
 - Gera quiz em português do Brasil
 

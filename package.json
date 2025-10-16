@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v9.1-pdfjs",
-  "version": "1.9.1",
-  "description": "Áudio + PDF (pdfjs-dist) + quiz PT-BR",
+  "name": "quiz-ai-render-v9.2-pdfjs-fix",
+  "version": "1.9.2",
+  "description": "Áudio + PDF (pdfjs-dist) + quiz PT-BR — correção de WAV",
   "type": "module",
   "main": "index.js",
   "scripts": {
