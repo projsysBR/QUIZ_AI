@@ -1,3 +1,3 @@
-# Quiz API v9.4 (Uint8Array fix)
-- `pdfjs-dist` agora recebe `Uint8Array` em vez de `Buffer`
-- Suporte a PDF e áudio; saída JSON compatível
+# Quiz API v9.5 (Uint8Array order fix)
+- Converte Buffer -> Uint8Array **antes** de checar instanceof
+- Garante que pdfjs não receba Buffer (mesmo sendo subclass de Uint8Array)

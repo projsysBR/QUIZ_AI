@@ -69,17 +69,16 @@ async function transcribeAudioBuffer(buf, { contentType, ext }) {
   return data.text || "";
 }
 
-function toUint8Array(maybeBuffer) {
-  if (maybeBuffer instanceof Uint8Array) return maybeBuffer;
-  // Node Buffer -> Uint8Array view without copy
-  if (Buffer.isBuffer(maybeBuffer)) {
-    return new Uint8Array(maybeBuffer.buffer, maybeBuffer.byteOffset, maybeBuffer.byteLength);
+// Important: Buffer is a subclass of Uint8Array.
+// pdfjs exige *não* ser Buffer. Convertemos explicitamente se for Buffer.
+function toUint8Array(maybe) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(maybe)) {
+    return new Uint8Array(maybe.buffer, maybe.byteOffset, maybe.byteLength);
   }
-  // ArrayBuffer
-  if (maybeBuffer && maybeBuffer.buffer) {
-    return new Uint8Array(maybeBuffer.buffer);
-  }
-  return new Uint8Array(maybeBuffer);
+  if (maybe instanceof Uint8Array) return new Uint8Array(maybe.buffer, maybe.byteOffset, maybe.byteLength);
+  if (maybe && maybe.buffer instanceof ArrayBuffer) return new Uint8Array(maybe.buffer);
+  if (maybe instanceof ArrayBuffer) return new Uint8Array(maybe);
+  return new Uint8Array(maybe);
 }
 
 async function extractPdfText(buf) {
@@ -187,4 +186,4 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server v9.4 (pdfjs Uint8Array) running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server v9.5 (pdfjs Uint8Array fix-order) running on ${PORT}`));
