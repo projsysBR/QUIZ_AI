@@ -1,5 +1,5 @@
-# Quiz API v7 (Render)
-Retorna **JSON estruturado** para o Bubble no formato:
+# Quiz API v8 (PT-BR)
+Retorna perguntas e alternativas em **português do Brasil**, no formato:
 ```json
 { "quiz": { "questions": [ { "text": "...", "choices": ["A","B","C","D","E"], "answer_index": 0 } ] } }
 ```
@@ -11,8 +11,3 @@ Retorna **JSON estruturado** para o Bubble no formato:
 ## Env vars
 - `OPENAI_API_KEY` (obrigatória)
 - `PORT=10000` (opcional)
-
-## Teste
-```
-curl -X POST http://localhost:10000/quiz-from-url -H "Content-Type: application/json" -d '{"url":"https://.../video.mp4","num":3}'
-```
