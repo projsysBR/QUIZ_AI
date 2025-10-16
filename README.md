@@ -1,9 +1,3 @@
-# Quiz API v9.2 (pdfjs)
-- Corrige condição WAV (troca 'and' por '&&')
-- Suporte a PDF com pdfjs-dist
-- Suporte a áudio (mp3/m4a/webm/wav)
-- Gera quiz em português do Brasil
-
-Rotas:
-- POST /quiz-from-url  { url, num }
-- POST /quiz-from-upload  (multipart { file, num })
+# Quiz API v9.3 (pdfjs path fix)
+- Importa `pdfjs-dist/build/pdf.mjs` (compatível com Node ESM)
+- Suporte a PDF + áudio, saída igual às versões anteriores

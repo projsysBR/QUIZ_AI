@@ -2,29 +2,24 @@ import express from "express";
 import fetch from "node-fetch";
 import FormData from "form-data";
 import multer from "multer";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+// pdfjs-dist ESM entry (works on Node 18+): 
+// prefer build/pdf.mjs to avoid legacy path issues
+import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 
 const app = express();
 app.use(express.json({ limit: "30mb" }));
 const upload = multer();
 
 const PORT = process.env.PORT || 10000;
-const UA = { "User-Agent": "Mozilla/5.0" };
-const MAX = 25 * 1024 * 1024;
 
 // -------- Helpers --------
 function sniffContentType(buf) {
   if (!buf || buf.length < 12) return null;
-  // %PDF
   if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return { ct: "application/pdf", ext: "pdf" };
-  // ID3 / MP3
   if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return { ct: "audio/mpeg", ext: "mp3" };
   if (buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0) return { ct: "audio/mpeg", ext: "mp3" };
-  // WEBM (EBML)
   if (buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3) return { ct: "audio/webm", ext: "webm" };
-  // MP4 (ftyp)
   if (buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) return { ct: "audio/mp4", ext: "m4a" };
-  // WAV (RIFF....WAVE)
   if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x41 && buf[10] === 0x56 && buf[11] === 0x45) {
     return { ct: "audio/wav", ext: "wav" };
   }
@@ -48,7 +43,7 @@ async function fetchWithRetries(url, options, { tries = 4, baseDelay = 600 } = {
 }
 
 async function bufferFromDirect(url) {
-  const r = await fetchWithRetries(url, { headers: UA, redirect: "follow" });
+  const r = await fetchWithRetries(url, { redirect: "follow" });
   if (!r || !r.ok) throw new Error(`DIRECT_FETCH_${r?.status || 0}`);
   const serverCT = r.headers.get("content-type") || "";
   const buf = Buffer.from(await r.arrayBuffer());
@@ -180,4 +175,4 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server v9.2 (pdfjs) running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server v9.3 (pdfjs path fix) running on ${PORT}`));
