@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v8-ptbr",
-  "version": "1.8.0",
-  "description": "Transcrição + geração de quiz em português (Brasil)",
+  "name": "quiz-ai-render-v8.1-ptbr-fix",
+  "version": "1.8.1",
+  "description": "Transcrição + quiz PT-BR com validação de answer_index",
   "type": "module",
   "main": "index.js",
   "scripts": {

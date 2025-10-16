@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 10000;
 const UA = { "User-Agent": "Mozilla/5.0" };
 const MAX = 25 * 1024 * 1024;
 
+// -------- Helpers --------
 function sniffContentType(buf) {
   if (!buf || buf.length < 12) return null;
   if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return { ct: "audio/mpeg", ext: "mp3" };
@@ -18,6 +19,8 @@ function sniffContentType(buf) {
   if (buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3) return { ct: "audio/webm", ext: "webm" };
   if (buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) return { ct: "audio/mp4", ext: "m4a" };
   if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x41 && buf[10] === 0x56 && buf[11] === 0x45) return { ct: "audio/wav", ext: "wav" };
+  const head = buf.slice(0, 15).toString("utf8").toLowerCase();
+  if (head.startsWith("<!doctype") || head.startsWith("<html")) return { ct: "text/html", ext: "html" };
   return null;
 }
 
@@ -63,21 +66,79 @@ async function transcribeBuffer(buf, { contentType, ext }) {
   return data.text || "";
 }
 
+// -------- Fix helper to resolve correct answer index --------
+function normalizeQuestion(q) {
+  const out = {
+    text: String(q?.text || "").trim(),
+    choices: Array.isArray(q?.choices) ? q.choices.map(v => String(v || "")).map(s => s.trim()) : [],
+    answer_index: Number.isInteger(q?.answer_index) ? q.answer_index : null
+  };
+
+  // Try common alternative fields
+  if (out.answer_index == null) {
+    const letter = String(q?.answer || q?.correct_letter || "").trim().toUpperCase();
+    if (["A","B","C","D","E"].includes(letter)) {
+      out.answer_index = ["A","B","C","D","E"].indexOf(letter);
+    }
+  }
+
+  if (out.answer_index == null && typeof q?.correct === "number") {
+    out.answer_index = q.correct;
+  }
+
+  if (out.answer_index == null && typeof q?.correct_choice === "string" && out.choices.length) {
+    const idx = out.choices.findIndex(c => c.toLowerCase() === q.correct_choice.toLowerCase());
+    if (idx >= 0) out.answer_index = idx;
+  }
+
+  // Detect asterisk or '(correta)' markers in choices
+  if (out.answer_index == null && out.choices.length) {
+    const idxStar = out.choices.findIndex(c => c.startsWith("*"));
+    if (idxStar >= 0) {
+      out.choices = out.choices.map(c => c.replace(/^[*\s]+/, "").replace(/\s*\(correta\)$/i, "").trim());
+      out.answer_index = idxStar;
+    } else {
+      const idxTag = out.choices.findIndex(c => /(\[?correta\]?|\(correta\))/i.test(c));
+      if (idxTag >= 0) {
+        out.choices = out.choices.map(c => c.replace(/\s*(\[?correta\]?|\(correta\))/ig, "").trim());
+        out.answer_index = idxTag;
+      }
+    }
+  }
+
+  // Clamp and fallback
+  if (!Number.isInteger(out.answer_index) || out.answer_index < 0 || out.answer_index > 4) {
+    out.answer_index = 0;
+  }
+
+  // Ensure 5 choices
+  while (out.choices.length < 5) out.choices.push("");
+  if (out.choices.length > 5) out.choices = out.choices.slice(0,5);
+
+  return out;
+}
+
 async function generateQuizJSON(transcript, num) {
   const body = {
     model: "gpt-4o-mini",
     response_format: { type: "json_object" },
+    temperature: 0.7,
     messages: [
-      { role: "system", content: "Você é um gerador de questionários em português do Brasil. Todas as perguntas e alternativas devem estar em português do Brasil. Responda somente em JSON válido." },
+      { role: "system", content: "Você é um gerador de questionários em português do Brasil. Responda APENAS JSON válido." },
       { role: "user", content:
         `Com base no texto abaixo, gere ${num} perguntas de múltipla escolha em português do Brasil.
          Cada pergunta deve ter 5 alternativas (A, B, C, D, E) — todas em português — e apenas uma correta.
+         O campo "answer_index" DEVE ser um número inteiro entre 0 e 4 que corresponde exatamente à alternativa correta em "choices".
+         NÃO repita 0 em todas. Varie conforme a resposta correta.
          Retorne APENAS um JSON com este formato:
          {
            "questions": [
-             {"text": "pergunta em português", "choices": ["alternativa A", "alternativa B", "alternativa C", "alternativa D", "alternativa E"], "answer_index": 0}
+             {"text": "pergunta em português",
+              "choices": ["alternativa A","alternativa B","alternativa C","alternativa D","alternativa E"],
+              "answer_index": 0}
            ]
          }
+         Não inclua explicações fora do JSON.
          Texto original: ${transcript}`
       }
     ]
@@ -92,11 +153,18 @@ async function generateQuizJSON(transcript, num) {
   if (!r.ok) throw new Error(raw);
   const parsed = JSON.parse(raw);
   const content = parsed?.choices?.[0]?.message?.content || "{}";
+
   let quiz;
   try { quiz = JSON.parse(content); } catch { quiz = { questions: [] }; }
+  if (!Array.isArray(quiz.questions)) quiz.questions = [];
+
+  // Normalize and fix indices if needed
+  quiz.questions = quiz.questions.map(normalizeQuestion);
+
   return quiz;
 }
 
+// -------- Routes --------
 app.post("/quiz-from-url", async (req, res) => {
   try {
     const rawUrl = (req.body?.url || "").trim();
@@ -125,4 +193,6 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server v8 running on ${PORT}`));
+app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+app.listen(PORT, () => console.log(`Server v8.1 running on ${PORT}`));

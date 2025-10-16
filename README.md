@@ -1,13 +1,13 @@
-# Quiz API v8 (PT-BR)
-Retorna perguntas e alternativas em **português do Brasil**, no formato:
-```json
+# Quiz API v8.1 (PT-BR, answer_index fix)
+- Gera perguntas/alternativas em PT-BR
+- Força e valida `answer_index` (0..4) por questão, com várias heurísticas de correção (letra A-E, campo `correct`, marcador `*`, tag "(correta)" etc.).
+- Retorno:
 { "quiz": { "questions": [ { "text": "...", "choices": ["A","B","C","D","E"], "answer_index": 0 } ] } }
-```
 
-## Rotas
-- `POST /quiz-from-url` — body JSON: `{ "url": "<https://...>", "num": 5 }`
-- `POST /quiz-from-upload` — multipart: `file=@audio.mp3`, `num=5`
+Rotas:
+- POST /quiz-from-url  (JSON { url, num })
+- POST /quiz-from-upload  (multipart { file, num })
 
-## Env vars
-- `OPENAI_API_KEY` (obrigatória)
-- `PORT=10000` (opcional)
+Env:
+- OPENAI_API_KEY (obrigatório)
+- PORT=10000 (opcional)
