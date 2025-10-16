@@ -1,7 +1,7 @@
 {
-  "name": "render-openai-transcriber-v3",
-  "version": "1.2.0",
-  "description": "API Render para transcrição + quiz com sniff de MIME/contêiner",
+  "name": "render-openai-transcriber-v5",
+  "version": "1.4.0",
+  "description": "API Render para transcrição + quiz com fallback externo para YouTube e retries/ratelimit",
   "main": "index.js",
   "type": "module",
   "scripts": {
