@@ -1,20 +1,12 @@
-# Render OpenAI Transcriber v2
+# Render OpenAI Transcriber v3
 
-Versão corrigida com fallback de MIME seguro (audio/mpeg) para evitar erro "Unsupported file format bin".
+Versão com *sniffer* de formato para garantir que o `file` enviado à OpenAI tenha **bytes, extensão e MIME consistentes**.
 
-## Instalação
-```bash
-npm install
+## Deploy
+- `npm install`
+- `OPENAI_API_KEY=sk-*** node index.js`
+
+## Teste
 ```
-
-## Execução
-```bash
-OPENAI_API_KEY=sk-XXX node index.js
+curl -X POST http://localhost:3000/quiz-from-url   -H "Content-Type: application/json"   -d '{"url":"https://www.youtube.com/watch?v=XXXX","num":5}'
 ```
-
-## Teste rápido
-```bash
-curl -X POST https://seu-render-app.onrender.com/quiz-from-url   -H "Content-Type: application/json"   -d '{"url":"https://www.youtube.com/watch?v=XXXXXX","num":5}'
-```
-
-Retorna JSON com perguntas geradas.

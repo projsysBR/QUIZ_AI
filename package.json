@@ -1,7 +1,7 @@
 {
-  "name": "render-openai-transcriber-v2",
-  "version": "1.1.0",
-  "description": "API Render para transcrição e geração de questionários usando OpenAI (com fallback MIME fix)",
+  "name": "render-openai-transcriber-v3",
+  "version": "1.2.0",
+  "description": "API Render para transcrição + quiz com sniff de MIME/contêiner",
   "main": "index.js",
   "type": "module",
   "scripts": {
