@@ -1,45 +1,21 @@
-# Render OpenAI Transcriber v5 (com fallback YouTube)
+# v6 — Upload Direto (multipart)
 
-Esta versão adiciona:
-- **Fallback externo** quando o YouTube retorna 429 no `ytdl-core`.
-- **Retries** e propagação adequada de erros 429 da OpenAI.
-- Sniffer de formato para garantir que o `file` enviado à OpenAI seja válido (MP3/M4A/WEBM/WAV).
-- Rota `/health` para verificação.
+Evita bloqueios do YouTube/Vimeo. Envie o **arquivo** de áudio/vídeo diretamente do Bubble para a rota:
 
-## Variáveis de ambiente
-- `OPENAI_API_KEY` — sua chave da OpenAI (obrigatória).
-- `YT_FALLBACK_BASE` — base URL do seu serviço proxy de conversão YouTube→MP3/áudio.
-  - Ex.: `https://yt-proxy.suaempresa.com/api/mp3?url=`
-  - O serviço deve responder JSON: `{ "download_url": "https://..." , "content_type": "audio/mpeg" }`
-- `YT_FALLBACK_AUTH` — (opcional) header Authorization para o serviço de fallback (ex.: `Bearer xxx`).
-- **Recomendado no Render:** `YTDL_NO_UPDATE=1` para suprimir o aviso de update do ytdl-core.
+`POST /quiz-from-upload` (multipart/form-data)
 
-## Fluxo do Fallback
-1. Tenta `ytdl-core` normalmente.
-2. Se o erro do YouTube for **429**, chama `YT_FALLBACK_BASE + encodeURIComponent(videoUrl)`.
-3. O proxy responde com uma `download_url` de um arquivo de áudio (MP3/M4A/WEBM/WAV).
-4. O backend baixa esse arquivo e envia para a OpenAI.
+Campos:
+- `file` (arquivo) — mp3, m4a, webm, wav
+- `num` (opcional) — quantidade de perguntas
 
-## Rota principal
-`POST /quiz-from-url`
-
-Body:
-```json
-{
-  "url": "https://www.youtube.com/watch?v=XXXX",
-  "num": 5
-}
-```
-
-## Testes locais
+Exemplo cURL:
 ```bash
-npm install
-export OPENAI_API_KEY=sk-xxx
-export YT_FALLBACK_BASE=https://yt-proxy.suaempresa.com/api/mp3?url=
-node index.js
-curl -X POST http://localhost:10000/quiz-from-url -H "Content-Type: application/json" -d '{"url":"https://www.youtube.com/watch?v=aqz-KE-bpKQ","num":3}'
+curl -X POST https://SEU-APP-RENDER.onrender.com/quiz-from-upload   -H "Authorization: Bearer SEU_TOKEN_SE_EXISTIR"   -F "file=@/caminho/audio.mp3"   -F "num=5"
 ```
 
-## Observações
-- Se você não tiver um serviço de fallback, suba um **ytdl-server** próprio (existem repositórios open-source e imagens Docker) ou implemente uma **Cloudflare Worker** que chame `yt-dlp` hospedado em outro lugar.
-- Evite usar serviços públicos instáveis. Ter **proxy próprio** dá previsibilidade ao projeto.
+No Bubble (API Connector):
+- Method: POST
+- Body type: form-data
+- Key `file`: tipo **File**
+- Key `num`: tipo **Text/Number**
+- NÃO definir manualmente o Content-Type (o Bubble define multipart).
