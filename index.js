@@ -6,7 +6,7 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
-const MAX = 25 * 1024 * 1024; // 25MB limite
+const MAX = 25 * 1024 * 1024; // 25MB
 
 const UA = { "User-Agent": "Mozilla/5.0" };
 
@@ -65,7 +65,6 @@ async function bufferFromDirect(url, { maxBytes = MAX } = {}) {
 }
 
 function isYouTube(url) { return /youtube\.com|youtu\.be/.test(url); }
-function isVimeo(url) { return /vimeo\.com/.test(url); }
 
 app.post("/quiz-from-url", async (req, res) => {
   try {
@@ -79,9 +78,14 @@ app.post("/quiz-from-url", async (req, res) => {
     const { buf, contentType } = out;
     const ext = extFromContentType(contentType);
 
+    const fixedCT = contentType && contentType.startsWith("audio/")
+      ? contentType
+      : "audio/mpeg"; // fallback seguro
+    const fixedExt = ext === "bin" ? "mp3" : ext;
+
     const form = new FormData();
     form.append("model", "gpt-4o-transcribe");
-    form.append("file", buf, { filename: `media.${ext}`, contentType });
+    form.append("file", buf, { filename: `media.${fixedExt}`, contentType: fixedCT });
 
     const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -98,14 +102,8 @@ app.post("/quiz-from-url", async (req, res) => {
     const qBody = {
       model: "gpt-4o-mini",
       messages: [
-        {
-          role: "system",
-          content: "Você é um gerador de questionários."
-        },
-        {
-          role: "user",
-          content: `Gere ${num} perguntas de múltipla escolha (5 alternativas, 1 correta) com base neste texto: ${transcript}.`
-        }
+        { role: "system", content: "Você é um gerador de questionários." },
+        { role: "user", content: `Gere ${num} perguntas de múltipla escolha (5 alternativas, 1 correta) com base neste texto: ${transcript}.` }
       ]
     };
 
