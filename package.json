@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v8.1-ptbr-fix",
-  "version": "1.8.1",
-  "description": "Transcrição + quiz PT-BR com validação de answer_index",
+  "name": "quiz-ai-render-v9-pdf",
+  "version": "1.9.0",
+  "description": "Transcrição de áudio e leitura de PDF + quiz em PT-BR",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "express": "^4.18.2",
     "form-data": "^4.0.0",
     "multer": "^1.4.5-lts.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1"
   }
 }
