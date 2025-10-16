@@ -2,8 +2,6 @@ import express from "express";
 import fetch from "node-fetch";
 import FormData from "form-data";
 import multer from "multer";
-// pdfjs-dist ESM entry (works on Node 18+): 
-// prefer build/pdf.mjs to avoid legacy path issues
 import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 
 const app = express();
@@ -71,8 +69,22 @@ async function transcribeAudioBuffer(buf, { contentType, ext }) {
   return data.text || "";
 }
 
+function toUint8Array(maybeBuffer) {
+  if (maybeBuffer instanceof Uint8Array) return maybeBuffer;
+  // Node Buffer -> Uint8Array view without copy
+  if (Buffer.isBuffer(maybeBuffer)) {
+    return new Uint8Array(maybeBuffer.buffer, maybeBuffer.byteOffset, maybeBuffer.byteLength);
+  }
+  // ArrayBuffer
+  if (maybeBuffer && maybeBuffer.buffer) {
+    return new Uint8Array(maybeBuffer.buffer);
+  }
+  return new Uint8Array(maybeBuffer);
+}
+
 async function extractPdfText(buf) {
-  const loadingTask = pdfjsLib.getDocument({ data: buf });
+  const data = toUint8Array(buf);
+  const loadingTask = pdfjsLib.getDocument({ data });
   const pdf = await loadingTask.promise;
   let text = "";
   for (let p = 1; p <= pdf.numPages; p++) {
@@ -175,4 +187,4 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server v9.3 (pdfjs path fix) running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server v9.4 (pdfjs Uint8Array) running on ${PORT}`));

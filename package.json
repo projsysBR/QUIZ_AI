@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v9.3-pdfjs-fixpath",
-  "version": "1.9.3",
-  "description": "Áudio + PDF (pdfjs-dist build/pdf.mjs) + quiz PT-BR",
+  "name": "quiz-ai-render-v9.4-pdfjs-uint8",
+  "version": "1.9.4",
+  "description": "Áudio + PDF (pdfjs-dist; Uint8Array fix) + quiz PT-BR",
   "type": "module",
   "main": "index.js",
   "scripts": {

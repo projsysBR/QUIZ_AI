@@ -1,3 +1,3 @@
-# Quiz API v9.3 (pdfjs path fix)
-- Importa `pdfjs-dist/build/pdf.mjs` (compatível com Node ESM)
-- Suporte a PDF + áudio, saída igual às versões anteriores
+# Quiz API v9.4 (Uint8Array fix)
+- `pdfjs-dist` agora recebe `Uint8Array` em vez de `Buffer`
+- Suporte a PDF e áudio; saída JSON compatível
