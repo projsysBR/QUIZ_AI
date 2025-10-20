@@ -10,7 +10,6 @@ const upload = multer();
 
 const PORT = process.env.PORT || 10000;
 
-// -------- Helpers --------
 function sniffContentType(buf) {
   if (!buf || buf.length < 12) return null;
   if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return { ct: "application/pdf", ext: "pdf" };
@@ -69,13 +68,13 @@ async function transcribeAudioBuffer(buf, { contentType, ext }) {
   return data.text || "";
 }
 
-// Important: Buffer is a subclass of Uint8Array.
-// pdfjs exige *não* ser Buffer. Convertemos explicitamente se for Buffer.
 function toUint8Array(maybe) {
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(maybe)) {
     return new Uint8Array(maybe.buffer, maybe.byteOffset, maybe.byteLength);
   }
-  if (maybe instanceof Uint8Array) return new Uint8Array(maybe.buffer, maybe.byteOffset, maybe.byteLength);
+  if (maybe instanceof Uint8Array) {
+    return new Uint8Array(maybe.buffer, maybe.byteOffset, maybe.byteLength);
+  }
   if (maybe && maybe.buffer instanceof ArrayBuffer) return new Uint8Array(maybe.buffer);
   if (maybe instanceof ArrayBuffer) return new Uint8Array(maybe);
   return new Uint8Array(maybe);
@@ -95,6 +94,20 @@ async function extractPdfText(buf) {
   return text.trim();
 }
 
+// Numbering
+function prefixQuestionNumber(i, text) {
+  const n = i + 1;
+  const t = String(text || "").trim();
+  if (/^\d+\./.test(t)) return t;
+  return `${n}. ${t}`;
+}
+function prefixChoiceNumber(i, j, choice) {
+  const n = i + 1;
+  const c = String(choice || "").trim();
+  if (/^\d+\.\d\)/.test(c)) return c;
+  return `${n}.${j}) ${c}`;
+}
+
 async function generateQuizJSON(transcript, num) {
   const body = {
     model: "gpt-4o-mini",
@@ -109,9 +122,14 @@ async function generateQuizJSON(transcript, num) {
          Retorne somente JSON no formato:
          {
            "questions": [
-             { "text": "pergunta", "choices": ["A","B","C","D","E"], "answer_index": 0 }
+             { "number": 1,
+               "text": "1. pergunta",
+               "choices": ["1.0) alternativa A", "1.1) alternativa B", "1.2) alternativa C", "1.3) alternativa D", "1.4) alternativa E"],
+               "answer_index": 0
+             }
            ]
          }
+         Número da questão e das alternativas devem seguir o padrão acima.
          Conteúdo: ${transcript}`
       }
     ]
@@ -129,15 +147,21 @@ async function generateQuizJSON(transcript, num) {
   let quiz;
   try { quiz = JSON.parse(content); } catch { quiz = { questions: [] }; }
   if (!Array.isArray(quiz.questions)) quiz.questions = [];
-  quiz.questions = quiz.questions.map(q => ({
-    text: String(q?.text || "").trim(),
-    choices: Array.isArray(q?.choices) ? q.choices.map(c => String(c)) : [],
-    answer_index: Number.isInteger(q?.answer_index) ? q.answer_index : 0
-  }));
-  return quiz;
+
+  const normalized = quiz.questions.map((q, i) => {
+    const number = Number.isInteger(q?.number) ? q.number : i + 1;
+    const text = prefixQuestionNumber(i, q?.text);
+    let choices = Array.isArray(q?.choices) ? q.choices.slice(0, 5) : [];
+    while (choices.length < 5) choices.push("");
+    choices = choices.map((c, j) => prefixChoiceNumber(i, j, c));
+    let answer_index = Number.isInteger(q?.answer_index) ? q.answer_index : 0;
+    if (answer_index < 0 || answer_index > 4) answer_index = 0;
+    return { number, text, choices, answer_index };
+  });
+
+  return { questions: normalized };
 }
 
-// -------- Routes --------
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.post("/quiz-from-url", async (req, res) => {
@@ -157,7 +181,7 @@ app.post("/quiz-from-url", async (req, res) => {
     }
 
     const quiz = await generateQuizJSON(transcript, num);
-    res.json({ quiz });
+    res.json(quiz);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -180,10 +204,10 @@ app.post("/quiz-from-upload", upload.single("file"), async (req, res) => {
     }
 
     const quiz = await generateQuizJSON(transcript, num);
-    res.json({ quiz });
+    res.json(quiz);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.listen(PORT, () => console.log(`Server v9.5 (pdfjs Uint8Array fix-order) running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server v9.6 (numbered) running on ${PORT}`));
