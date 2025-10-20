@@ -1,7 +1,7 @@
 {
-  "name": "quiz-ai-render-v9.6-numbered",
-  "version": "1.9.6",
-  "description": "Áudio + PDF (pdfjs-dist) + quiz PT-BR com numeração de perguntas e alternativas",
+  "name": "quiz-ai-render-v9.11-ultra-sanitize",
+  "version": "1.9.11",
+  "description": "Quiz PT-BR com sanitização ULTRA de numerações e answer_index 1-5",
   "type": "module",
   "main": "index.js",
   "scripts": { "start": "node index.js" },
